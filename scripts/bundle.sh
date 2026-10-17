@@ -1,0 +1,28 @@
+#!/bin/bash
+# Builds a universal "007 Talk.app" and zips it. Runs on macOS (GitHub Actions or locally).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VERSION=$(cat VERSION)
+BUILD=${GITHUB_RUN_NUMBER:-1}
+APP="build/007 Talk.app"
+
+swift build -c release --arch arm64 --arch x86_64
+BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
+
+rm -rf build
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/AppIcon.iconset
+cp "$BIN_DIR/Talk007" "$APP/Contents/MacOS/Talk007"
+
+for s in 16 32 128 256 512; do
+  sips -z $s $s Resources/icon.png --out "build/AppIcon.iconset/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2))
+  sips -z $d $d Resources/icon.png --out "build/AppIcon.iconset/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
+
+sed "s/__VERSION__/$VERSION/g; s/__BUILD__/$BUILD/g" Resources/Info.plist > "$APP/Contents/Info.plist"
+
+codesign --force --deep --sign - "$APP"
+ditto -c -k --keepParent "$APP" "build/007-Talk-$VERSION.zip"
+echo "Built build/007-Talk-$VERSION.zip"

@@ -109,6 +109,112 @@ final class TalkAPI {
     func revoke() async throws {
         _ = try await request("ocs/v2.php/core/apppassword", method: "DELETE")
     }
+
+    // MARK: Files, previews, avatars
+
+    var authorizationHeader: String {
+        "Basic " + Data("\(account.loginName):\(password)".utf8).base64EncodedString()
+    }
+
+    private func url(_ path: String, query: [URLQueryItem] = []) -> URL? {
+        guard var comps = URLComponents(url: account.server.appendingPathComponent(path), resolvingAgainstBaseURL: false) else { return nil }
+        if !query.isEmpty { comps.queryItems = query }
+        return comps.url
+    }
+
+    func previewURL(fileId: String, size: Int) -> URL? {
+        url("index.php/core/preview", query: [
+            URLQueryItem(name: "fileId", value: fileId),
+            URLQueryItem(name: "x", value: String(size)),
+            URLQueryItem(name: "y", value: String(size)),
+            URLQueryItem(name: "a", value: "1"),
+        ])
+    }
+
+    func userAvatarURL(_ userId: String, size: Int = 128) -> URL? {
+        guard let id = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        return URL(string: account.server.absoluteString + "/index.php/avatar/\(id)/\(size)")
+    }
+
+    func roomAvatarURL(_ room: Room) -> URL? {
+        url("ocs/v2.php/apps/spreed/api/v1/room/\(room.token)/avatar",
+            query: [URLQueryItem(name: "v", value: room.avatarVersion ?? "0")])
+    }
+
+    /// WebDAV address of a file in the user's storage (path as given by Talk, e.g. "Talk/photo.jpg").
+    func davURL(path: String) -> URL? {
+        let encoded = path.split(separator: "/").map {
+            String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? String($0)
+        }.joined(separator: "/")
+        guard let user = account.userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        return URL(string: account.server.absoluteString + "/remote.php/dav/files/\(user)/\(encoded)")
+    }
+
+    /// Authorized GET of any server URL (previews, avatars, file downloads).
+    func fetch(_ url: URL, timeout: TimeInterval = 60) async throws -> Data {
+        var r = URLRequest(url: url, timeoutInterval: timeout)
+        r.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        r.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        r.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await session.data(for: r)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode) }
+        return data
+    }
+
+    func download(_ url: URL, to destination: URL) async throws {
+        var r = URLRequest(url: url, timeoutInterval: 600)
+        r.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        r.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let (tmp, resp) = try await session.download(for: r)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.http((resp as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: tmp, to: destination)
+    }
+
+    // MARK: Shared items, users, conversations
+
+    /// objectType: "media" (images/videos), "file", "audio", "voice", ...
+    func sharedItems(token: String, objectType: String, before: Int?, limit: Int = 100) async throws -> [ChatMessage] {
+        var q = [
+            URLQueryItem(name: "objectType", value: objectType),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let before { q.append(URLQueryItem(name: "lastKnownMessageId", value: String(before))) }
+        let (data, _) = try await request("ocs/v2.php/apps/spreed/api/v1/chat/\(token)/share", query: q)
+        // A dictionary keyed by message id, or [] when empty.
+        if let dict = try? JSONDecoder().decode(OCSResponse<[String: ChatMessage]>.self, from: data) {
+            return dict.ocs.data.values.sorted { $0.id > $1.id }
+        }
+        return []
+    }
+
+    func searchUsers(_ term: String) async throws -> [UserSuggestion] {
+        let (data, _) = try await request("ocs/v2.php/core/autocomplete/get", query: [
+            URLQueryItem(name: "search", value: term),
+            URLQueryItem(name: "itemType", value: "call"),
+            URLQueryItem(name: "itemId", value: "new"),
+            URLQueryItem(name: "shareTypes[]", value: "0"),
+            URLQueryItem(name: "limit", value: "50"),
+        ])
+        return try JSONDecoder().decode(OCSResponse<[UserSuggestion]>.self, from: data).ocs.data
+    }
+
+    /// Opens (or creates) the one-to-one conversation with a user.
+    func createOneToOne(userId: String) async throws -> Room {
+        let (data, _) = try await request("ocs/v2.php/apps/spreed/api/v4/room", method: "POST",
+                                          body: ["roomType": 1, "invite": userId])
+        return try JSONDecoder().decode(OCSResponse<Room>.self, from: data).ocs.data
+    }
+
+    /// Shares an existing file into a conversation (used for forwarding attachments).
+    func shareFile(path: String, toRoom token: String) async throws {
+        let p = path.hasPrefix("/") ? path : "/" + path
+        _ = try await request("ocs/v2.php/apps/files_sharing/api/v1/shares", method: "POST",
+                              body: ["shareType": 10, "shareWith": token, "path": p])
+    }
 }
 
 /// Nextcloud Login Flow v2: the user approves in the browser, the app receives an app password.

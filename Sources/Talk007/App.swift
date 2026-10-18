@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var window: NSWindow?
+    private var viewerWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var store: AppStore { AppStore.shared }
 
@@ -113,9 +114,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         window?.makeKeyAndOrderFront(nil)
     }
 
-    func windowDidBecomeKey(_ notification: Notification) { store.isChatVisible = true }
-    func windowDidResignKey(_ notification: Notification) { store.isChatVisible = false }
-    func windowWillClose(_ notification: Notification) { store.isChatVisible = false }
+    // MARK: Media viewer
+
+    func showViewer(items: [MediaItem], index: Int) {
+        guard !items.isEmpty else { return }
+        let content = NSHostingView(rootView: MediaViewer(items: items, index: index).environmentObject(store))
+        if let w = viewerWindow {
+            w.contentView = content
+        } else {
+            let w = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                backing: .buffered, defer: false
+            )
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.backgroundColor = .black
+            w.isReleasedWhenClosed = false
+            w.contentView = content
+            w.center()
+            w.setFrameAutosaveName("MediaViewer")
+            viewerWindow = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        viewerWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // Only the main window drives the read state.
+    private func isMain(_ n: Notification) -> Bool { (n.object as? NSWindow) === window }
+    func windowDidBecomeKey(_ notification: Notification) { if isMain(notification) { store.isChatVisible = true } }
+    func windowDidResignKey(_ notification: Notification) { if isMain(notification) { store.isChatVisible = false } }
+    func windowWillClose(_ notification: Notification) { if isMain(notification) { store.isChatVisible = false } }
 
     // MARK: Notifications
 

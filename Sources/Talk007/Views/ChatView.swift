@@ -7,15 +7,34 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(room.displayName).font(.headline).lineLimit(1)
+            HStack(spacing: 10) {
+                Button { store.showInfo.toggle() } label: {
+                    HStack(spacing: 10) {
+                        Avatar(name: room.displayName, url: store.avatarURL(for: room), size: 32)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(room.displayName).font(Theme.title).lineLimit(1)
+                            Text("Media, files and info")
+                                .font(Theme.small)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Spacer()
+                Button { store.showInfo.toggle() } label: {
+                    Image(systemName: store.showInfo ? "sidebar.right" : "photo.on.rectangle.angled")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Media and files")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
 
             Divider()
-            MessageList()
+            MessageList(room: room)
             Divider()
             Composer(readOnly: room.readOnly == 1)
         }
@@ -26,6 +45,7 @@ struct ChatView: View {
 
 struct MessageList: View {
     @EnvironmentObject var store: AppStore
+    let room: Room
 
     var body: some View {
         let messages = store.messages
@@ -48,7 +68,8 @@ struct MessageList: View {
                             MessageRow(
                                 message: msg,
                                 isMine: msg.actorType == "users" && msg.actorId == store.myUserId,
-                                showHeader: !grouped
+                                showHeader: !grouped,
+                                showAvatar: !room.isOneToOne
                             )
                         }
                         .id(msg.id)
@@ -75,8 +96,11 @@ struct DaySeparator: View {
 
     var body: some View {
         Text(Fmt.day(date))
-            .font(.caption.weight(.medium))
+            .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.primary.opacity(0.05)))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
     }
@@ -87,22 +111,37 @@ struct MessageRow: View {
     let message: ChatMessage
     let isMine: Bool
     let showHeader: Bool
+    let showAvatar: Bool
+    @State private var hovering = false
 
     var body: some View {
         if message.isSystem {
             Text(message.attributedText())
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
         } else {
-            HStack(alignment: .bottom, spacing: 0) {
-                if isMine { Spacer(minLength: 80) }
+            HStack(alignment: .top, spacing: 8) {
+                if isMine {
+                    Spacer(minLength: 60)
+                    actions
+                } else if showAvatar {
+                    if showHeader {
+                        Avatar(name: message.actorDisplayName,
+                               url: message.actorType == "users" ? store.userAvatarURL(message.actorId) : nil,
+                               size: 30)
+                            .padding(.top, 8)
+                    } else {
+                        Color.clear.frame(width: 30, height: 1)
+                    }
+                }
+
                 VStack(alignment: isMine ? .trailing : .leading, spacing: 3) {
                     if showHeader && !isMine {
                         Text(message.actorDisplayName)
-                            .font(.caption.weight(.semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 4)
                             .padding(.top, 8)
@@ -111,55 +150,200 @@ struct MessageRow: View {
                     }
                     bubble
                 }
-                if !isMine { Spacer(minLength: 80) }
+
+                if !isMine {
+                    actions
+                    Spacer(minLength: 60)
+                }
             }
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
         }
     }
 
+    /// Reply / forward / copy, shown while the pointer is over the message.
+    private var actions: some View {
+        HStack(spacing: 2) {
+            ActionButton(symbol: "arrowshape.turn.up.left", help: "Reply") { store.replyTo = message }
+            ActionButton(symbol: "arrowshape.turn.up.right", help: "Forward") { store.forwarding = message }
+            ActionButton(symbol: "doc.on.doc", help: "Copy") { store.copy(message) }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(.regularMaterial))
+        .overlay(Capsule().stroke(Color.primary.opacity(0.08)))
+        .opacity(hovering && !message.isDeleted ? 1 : 0)
+        .padding(.top, showHeader ? 30 : 6)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+
     private var bubble: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             if let parent = message.parent?.value {
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 1).fill(Color.accentColor).frame(width: 2)
+                HStack(spacing: 7) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(parent.actorDisplayName).font(.caption.weight(.semibold))
-                        Text(parent.isDeleted ? "Message deleted" : parent.renderedText)
-                            .font(.caption)
+                        Text(parent.actorDisplayName).font(.system(size: 12, weight: .semibold))
+                        Text(parent.previewText)
+                            .font(Theme.caption)
                             .lineLimit(2)
                     }
                     .foregroundStyle(.secondary)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Group {
-                    if message.isDeleted {
-                        Text("Message deleted").italic().foregroundStyle(.secondary)
-                    } else {
-                        Text(message.attributedText())
-                    }
+
+            if let file = message.file {
+                AttachmentView(message: message, file: file)
+                if !message.caption.isEmpty {
+                    textWithTime(message.attributedText(excludingFile: true))
+                } else {
+                    Text(Fmt.time(message.timestamp))
+                        .font(Theme.small)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .textSelection(.enabled)
-                Text(Fmt.time(message.timestamp))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            } else if message.isDeleted {
+                HStack(alignment: .lastTextBaseline, spacing: 8) {
+                    Text("Message deleted").italic().foregroundStyle(.secondary).font(Theme.body)
+                    Text(Fmt.time(message.timestamp)).font(Theme.small).foregroundStyle(.tertiary)
+                }
+            } else {
+                textWithTime(message.attributedText())
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(isMine ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
         )
         .contextMenu {
             if !message.isDeleted {
                 Button("Reply") { store.replyTo = message }
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(message.renderedText, forType: .string)
+                Button("Forward…") { store.forwarding = message }
+                Button("Copy") { store.copy(message) }
+                if let file = message.file {
+                    Divider()
+                    Button("Open") { store.open(message) }
+                    Button("Save to Downloads") { store.saveToDownloads(file) }
                 }
             }
         }
+    }
+
+    private func textWithTime(_ text: AttributedString) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 8) {
+            Text(text)
+                .font(Theme.body)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(Fmt.time(message.timestamp))
+                .font(Theme.small)
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+struct ActionButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
+    }
+}
+
+// MARK: - Attachments
+
+struct AttachmentView: View {
+    @EnvironmentObject var store: AppStore
+    let message: ChatMessage
+    let file: MessageParameter
+
+    var body: some View {
+        if file.isMedia {
+            MediaThumbnail(file: file, maxSize: CGSize(width: 300, height: 320))
+                .onTapGesture { store.open(message) }
+                .help(file.name ?? "")
+        } else {
+            FileCard(file: file)
+                .onTapGesture { store.openFile(file) }
+        }
+    }
+}
+
+/// Image/video preview sized like WhatsApp: keeps the aspect ratio inside a box.
+struct MediaThumbnail: View {
+    @EnvironmentObject var store: AppStore
+    let file: MessageParameter
+    let maxSize: CGSize
+
+    private var size: CGSize {
+        guard let w = file.width, let h = file.height, w > 0, h > 0 else {
+            return CGSize(width: min(260, maxSize.width), height: min(195, maxSize.height))
+        }
+        let scale = min(maxSize.width / CGFloat(w), maxSize.height / CGFloat(h), 1)
+        return CGSize(width: max(CGFloat(w) * scale, 120), height: max(CGFloat(h) * scale, 90))
+    }
+
+    var body: some View {
+        ZStack {
+            RemoteImage(url: file.previewAvailable ? store.previewURL(file, size: 640) : nil) {
+                ZStack {
+                    Color.primary.opacity(0.08)
+                    if file.previewAvailable {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: file.symbolName).font(.system(size: 30)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(width: size.width, height: size.height)
+            .clipped()
+
+            if file.isVideo {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 46))
+                    .foregroundStyle(.white, .black.opacity(0.45))
+                    .shadow(radius: 4)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
+    }
+}
+
+struct FileCard: View {
+    let file: MessageParameter
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: file.symbolName)
+                .font(.system(size: 22))
+                .foregroundColor(.accentColor)
+                .frame(width: 40, height: 40)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.name ?? "File").font(.system(size: 14, weight: .medium)).lineLimit(2)
+                if !file.sizeText.isEmpty {
+                    Text(file.sizeText).font(Theme.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 220, maxWidth: 300, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -178,32 +362,35 @@ struct Composer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let reply = store.replyTo {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrowshape.turn.up.left")
-                    Text("\(reply.actorDisplayName): \(reply.renderedText)").lineLimit(1)
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3, height: 30)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Reply to \(reply.actorDisplayName)").font(.system(size: 12, weight: .semibold))
+                        Text(reply.previewText).font(Theme.caption).lineLimit(1)
+                    }
                     Spacer()
                     Button { store.replyTo = nil } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain)
                 }
-                .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(readOnly ? "This conversation is read-only" : "Message", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
+                    .font(Theme.body)
                     .lineLimit(1...6)
                     .focused($focused)
                     .disabled(readOnly)
                     .onSubmit(send)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
                     .background(
-                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .fill(Color.primary.opacity(0.06))
                     )
                 Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 26))
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(canSend ? .accentColor : .secondary.opacity(0.5))

@@ -1,7 +1,35 @@
 import SwiftUI
 
+/// Loads an image from the Nextcloud server with the account's credentials.
+struct RemoteImage<Placeholder: View>: View {
+    @EnvironmentObject var store: AppStore
+    let url: URL?
+    var contentMode: ContentMode = .fill
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            guard let url, let api = store.apiClient else { image = nil; return }
+            if let cached = store.media.cached(url) { image = cached; return }
+            image = await store.media.image(url, api: api)
+        }
+    }
+}
+
 struct Avatar: View {
     let name: String
+    var url: URL? = nil
     var size: CGFloat = 32
 
     private static let palette: [Color] = [
@@ -22,15 +50,20 @@ struct Avatar: View {
         return Self.palette[hash % Self.palette.count]
     }
 
-    var body: some View {
+    private var initialsView: some View {
         Circle()
             .fill(color)
-            .frame(width: size, height: size)
             .overlay(
                 Text(initials)
                     .font(.system(size: size * 0.38, weight: .semibold))
                     .foregroundColor(.white)
             )
+    }
+
+    var body: some View {
+        RemoteImage(url: url) { initialsView }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
     }
 }
 
@@ -40,9 +73,9 @@ struct UnreadBadge: View {
 
     var body: some View {
         Text(count > 99 ? "99+" : "\(count)")
-            .font(.caption2.weight(.semibold))
+            .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 6)
-            .padding(.vertical, 1)
+            .padding(.vertical, 2)
             .background(Capsule().fill(strong ? Color.accentColor : Color.secondary.opacity(0.25)))
             .foregroundColor(strong ? .white : .primary)
     }
@@ -50,29 +83,29 @@ struct UnreadBadge: View {
 
 /// One conversation line, used in the sidebar and the menu bar popover.
 struct RoomRow: View {
+    @EnvironmentObject var store: AppStore
     let room: Room
-    let me: String?
-    var avatarSize: CGFloat = 32
+    var avatarSize: CGFloat = 38
 
     var body: some View {
         HStack(spacing: 10) {
-            Avatar(name: room.displayName, size: avatarSize)
-            VStack(alignment: .leading, spacing: 2) {
+            Avatar(name: room.displayName, url: store.avatarURL(for: room), size: avatarSize)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(room.displayName)
-                        .fontWeight(room.unreadMessages > 0 ? .semibold : .regular)
+                        .font(.system(size: 14, weight: room.unreadMessages > 0 ? .bold : .semibold))
                         .lineLimit(1)
                     if room.isFavorite {
-                        Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(.secondary)
+                        Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
                     Text(Fmt.relative(room.lastActivity))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Theme.small)
+                        .foregroundColor(room.unreadMessages > 0 ? .accentColor : .secondary)
                 }
                 HStack(spacing: 6) {
-                    Text(room.preview(me: me))
-                        .font(.callout)
+                    Text(room.preview(me: store.myUserId))
+                        .font(Theme.preview)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
@@ -82,7 +115,30 @@ struct RoomRow: View {
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
+    }
+}
+
+/// Small search field used in the sidebar, archive and pickers.
+struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 }
 
@@ -123,5 +179,32 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 380)
+    }
+}
+
+/// Short message at the bottom of the window ("Copied", "Forwarded to …").
+struct ToastView: View {
+    @EnvironmentObject var store: AppStore
+
+    var body: some View {
+        VStack {
+            Spacer()
+            if let text = store.toast {
+                Text(text)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(.regularMaterial))
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                    .padding(.bottom, 80)
+                    .transition(.opacity)
+                    .task(id: text) {
+                        try? await Task.sleep(nanoseconds: 2_200_000_000)
+                        if store.toast == text { withAnimation { store.toast = nil } }
+                    }
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.2), value: store.toast)
     }
 }

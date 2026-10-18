@@ -18,8 +18,23 @@ final class AppStore: ObservableObject {
     @Published private(set) var connectionError: String?
     @Published var replyTo: ChatMessage?
     @Published var selectedToken: String? {
-        didSet { if oldValue != selectedToken { openChat() } }
+        didSet { if oldValue != selectedToken { openChat(); resetArchive() } }
     }
+
+    // UI state
+    @Published var showInfo = false { didSet { if showInfo && !oldValue { loadArchive() } } }
+    @Published var showNewConversation = false
+    @Published var forwarding: ChatMessage?
+    @Published var toast: String?
+
+    // Shared media/files of the selected conversation
+    @Published private(set) var sharedMedia: [MediaItem] = []
+    @Published private(set) var sharedFiles: [MediaItem] = []
+    @Published private(set) var archiveLoading = false
+    @Published private(set) var mediaHasMore = false
+    @Published private(set) var filesHasMore = false
+
+    let media = MediaCache()
 
     // Settings
     @Published var showInDock: Bool = UserDefaults.standard.object(forKey: "showInDock") as? Bool ?? true {
@@ -126,6 +141,8 @@ final class AppStore: ObservableObject {
         messages = []
         selectedToken = nil
         connectionError = nil
+        showInfo = false
+        media.clear()
         loginState = .loggedOut
     }
 
@@ -313,6 +330,155 @@ final class AppStore: ObservableObject {
             let ids = list.filter { $0.request.content.threadIdentifier == token }.map(\.request.identifier)
             if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
         }
+    }
+
+    // MARK: Media & files
+
+    var apiClient: TalkAPI? { api }
+
+    func previewURL(_ file: MessageParameter, size: Int) -> URL? {
+        guard let id = file.id else { return nil }
+        return api?.previewURL(fileId: id, size: size)
+    }
+
+    func userAvatarURL(_ userId: String) -> URL? { api?.userAvatarURL(userId) }
+
+    func avatarURL(for room: Room) -> URL? {
+        if room.isOneToOne, !room.name.isEmpty { return api?.userAvatarURL(room.name) }
+        return api?.roomAvatarURL(room)
+    }
+
+    /// Images and videos of the open conversation, oldest first (for the viewer's arrows).
+    var conversationMedia: [MediaItem] {
+        messages.compactMap { MediaItem(message: $0) }.filter { $0.file.isMedia }
+    }
+
+    func openMedia(_ item: MediaItem, in list: [MediaItem]) {
+        let index = list.firstIndex { $0.id == item.id } ?? 0
+        AppDelegate.shared?.showViewer(items: list.isEmpty ? [item] : list, index: list.isEmpty ? 0 : index)
+    }
+
+    func open(_ message: ChatMessage) {
+        guard let item = MediaItem(message: message) else { return }
+        if item.file.isMedia { openMedia(item, in: conversationMedia) } else { openFile(item.file) }
+    }
+
+    func openFile(_ file: MessageParameter) {
+        guard let api else { return }
+        toast = "Downloading \(file.name ?? "file")…"
+        Task {
+            do {
+                let url = try await media.localFile(for: file, api: api)
+                toast = nil
+                NSWorkspace.shared.open(url)
+            } catch {
+                toast = "Could not download the file."
+            }
+        }
+    }
+
+    func saveToDownloads(_ file: MessageParameter) {
+        guard let api else { return }
+        Task {
+            do {
+                let local = try await media.localFile(for: file, api: api)
+                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                let name = (file.name ?? local.lastPathComponent).replacingOccurrences(of: "/", with: "-")
+                var target = downloads.appendingPathComponent(name)
+                var n = 1
+                let base = target.deletingPathExtension().lastPathComponent, ext = target.pathExtension
+                while FileManager.default.fileExists(atPath: target.path) {
+                    target = downloads.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+                    n += 1
+                }
+                try FileManager.default.copyItem(at: local, to: target)
+                NSWorkspace.shared.activateFileViewerSelecting([target])
+                toast = "Saved to Downloads"
+            } catch {
+                toast = "Could not save the file."
+            }
+        }
+    }
+
+    // MARK: Archive
+
+    private func resetArchive() {
+        sharedMedia = []
+        sharedFiles = []
+        mediaHasMore = false
+        filesHasMore = false
+        if showInfo { loadArchive() }
+    }
+
+    func loadArchive(more kind: String? = nil) {
+        guard let token = selectedToken, let api else { return }
+        archiveLoading = true
+        Task {
+            defer { archiveLoading = false }
+            if kind == nil || kind == "media" {
+                let before = kind == nil ? nil : sharedMedia.last?.messageId
+                if let batch = try? await api.sharedItems(token: token, objectType: "media", before: before),
+                   selectedToken == token {
+                    let items = batch.compactMap { MediaItem(message: $0) }
+                    sharedMedia = kind == nil ? items : sharedMedia + items
+                    mediaHasMore = batch.count >= 100
+                }
+            }
+            if kind == nil || kind == "file" {
+                let before = kind == nil ? nil : sharedFiles.last?.messageId
+                if let batch = try? await api.sharedItems(token: token, objectType: "file", before: before),
+                   selectedToken == token {
+                    let items = batch.compactMap { MediaItem(message: $0) }
+                    sharedFiles = kind == nil ? items : sharedFiles + items
+                    filesHasMore = batch.count >= 100
+                }
+            }
+        }
+    }
+
+    // MARK: New conversation & forwarding
+
+    func searchUsers(_ term: String) async -> [UserSuggestion] {
+        guard let api else { return [] }
+        let users = (try? await api.searchUsers(term)) ?? []
+        return users.filter { $0.id != myUserId }
+    }
+
+    func startChat(with userId: String) async {
+        guard let api else { return }
+        do {
+            let room = try await api.createOneToOne(userId: userId)
+            await refreshRooms()
+            selectedToken = room.token
+        } catch {
+            toast = "Could not start the conversation."
+        }
+    }
+
+    func forward(_ message: ChatMessage, to token: String) async {
+        guard let api else { return }
+        let target = rooms.first { $0.token == token }?.displayName ?? "conversation"
+        do {
+            if let file = message.file, let path = file.path {
+                try await api.shareFile(path: path, toRoom: token)
+                if !message.caption.isEmpty {
+                    _ = try await api.send(token: token, text: String(message.attributedText(excludingFile: true).characters), replyTo: nil)
+                }
+            } else {
+                _ = try await api.send(token: token, text: message.renderedText, replyTo: nil)
+            }
+            toast = "Forwarded to \(target)"
+            await refreshRooms()
+        } catch {
+            toast = "Could not forward the message."
+        }
+    }
+
+    func copy(_ message: ChatMessage) {
+        NSPasteboard.general.clearContents()
+        let text = message.file != nil && message.caption.isEmpty ? (message.file?.name ?? "") : message.renderedText
+        NSPasteboard.general.setString(text, forType: .string)
+        toast = "Copied"
     }
 
     // MARK: Dock

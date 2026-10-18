@@ -31,7 +31,7 @@ struct MenuBarView: View {
                     HoverButton {
                         AppDelegate.shared?.showMainWindow(select: room.token)
                     } label: {
-                        RoomRow(room: room, me: store.myUserId, avatarSize: 30)
+                        RoomRow(room: room, avatarSize: 34)
                     }
                 }
             }
@@ -48,7 +48,7 @@ struct MenuBarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
-        .frame(width: 320)
+        .frame(width: 340)
     }
 }
 

@@ -67,10 +67,10 @@ final class AppStore: ObservableObject {
     private var firstRoomsLoad = true
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: "account"),
-           let acc = try? JSONDecoder().decode(Account.self, from: data),
-           let pw = Keychain.read(account: acc.keychainKey) {
-            activate(acc, password: pw)
+        // Old versions kept the password in the Keychain; reading it would block the launch, so just forget it.
+        UserDefaults.standard.removeObject(forKey: "account")
+        if let saved = CredentialStore.load() {
+            activate(saved.account, password: saved.appPassword)
         }
     }
 
@@ -111,8 +111,7 @@ final class AppStore: ObservableObject {
                     acc.userId = me.id
                     acc.displayName = me.displayName
                 }
-                Keychain.save(result.appPassword, account: acc.keychainKey)
-                UserDefaults.standard.set(try? JSONEncoder().encode(acc), forKey: "account")
+                CredentialStore.save(acc, password: result.appPassword)
                 activate(acc, password: result.appPassword)
                 NSApp.activate(ignoringOtherApps: true)
             } catch {
@@ -131,8 +130,7 @@ final class AppStore: ObservableObject {
     func logout() {
         let oldAPI = api
         Task { try? await oldAPI?.revoke() }
-        if let acc = account { Keychain.delete(account: acc.keychainKey) }
-        UserDefaults.standard.removeObject(forKey: "account")
+        CredentialStore.delete()
         roomsTask?.cancel()
         chatTask?.cancel()
         api = nil

@@ -51,7 +51,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             .store(in: &cancellables)
         updateStatusItem()
 
-        if store.loginState != .loggedIn { showMainWindow() }
+        // Opened by hand → show the window. Started at login → stay in the menu bar.
+        if !launchedAtLogin { showMainWindow() }
+    }
+
+    /// True only when macOS says we were started as a login item; otherwise the window is shown.
+    private var launchedAtLogin = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventID == AEEventID(kAEOpenApplication),
+           event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem) {
+            launchedAtLogin = true
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

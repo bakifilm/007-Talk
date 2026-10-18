@@ -1,39 +1,37 @@
 import Foundation
-import Security
 
-enum Keychain {
-    private static let service = "work.baki.talk007"
-
-    static func save(_ value: String, account: String) {
-        delete(account: account)
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: Data(value.utf8),
-        ]
-        SecItemAdd(q as CFDictionary, nil)
+/// Stores the account and its revocable Nextcloud app password in a private file
+/// (~/Library/Application Support/work.baki.talk007/account.json, readable only by the user).
+///
+/// The Keychain is not used: the app is ad-hoc signed, so every update changes its signature and
+/// macOS would block at launch asking for Keychain access again.
+enum CredentialStore {
+    struct Saved: Codable {
+        let account: Account
+        let appPassword: String
     }
 
-    static func read(account: String) -> String? {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+    private static var fileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("work.baki.talk007", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        return dir.appendingPathComponent("account.json")
     }
 
-    static func delete(account: String) {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(q as CFDictionary)
+    static func load() -> Saved? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? JSONDecoder().decode(Saved.self, from: data)
+    }
+
+    static func save(_ account: Account, password: String) {
+        guard let data = try? JSONEncoder().encode(Saved(account: account, appPassword: password)) else { return }
+        let url = fileURL
+        try? data.write(to: url, options: [.atomic])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    static func delete() {
+        try? FileManager.default.removeItem(at: fileURL)
     }
 }

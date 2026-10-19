@@ -76,7 +76,7 @@ struct UnreadBadge: View {
             .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Capsule().fill(strong ? Color.accentColor : Color.secondary.opacity(0.25)))
+            .background(Capsule().fill(strong ? Color.red : Color.secondary.opacity(0.25)))
             .foregroundColor(strong ? .white : .primary)
     }
 }
@@ -101,7 +101,7 @@ struct RoomRow: View {
                     Spacer(minLength: 4)
                     Text(Fmt.relative(room.lastActivity))
                         .font(Theme.small)
-                        .foregroundColor(room.unreadMessages > 0 ? .accentColor : .secondary)
+                        .foregroundColor(room.unreadMessages > 0 ? .red : .secondary)
                 }
                 HStack(spacing: 6) {
                     Text(room.preview(me: store.myUserId))
@@ -116,6 +116,13 @@ struct RoomRow: View {
             }
         }
         .padding(.vertical, 4)
+        // New messages: soft red background behind the conversation.
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(room.unreadMessages > 0 ? Color.red.opacity(0.18) : Color.clear)
+        )
+        .padding(.horizontal, -6)
     }
 }
 

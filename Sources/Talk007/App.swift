@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import Combine
 import SwiftUI
 import UserNotifications
@@ -144,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             w.appearance = NSAppearance(named: .darkAqua)
             w.backgroundColor = .black
             w.isReleasedWhenClosed = false
+            w.delegate = self
             w.contentView = content
             w.center()
             w.setFrameAutosaveName("MediaViewer")
@@ -157,7 +159,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private func isMain(_ n: Notification) -> Bool { (n.object as? NSWindow) === window }
     func windowDidBecomeKey(_ notification: Notification) { if isMain(notification) { store.isChatVisible = true } }
     func windowDidResignKey(_ notification: Notification) { if isMain(notification) { store.isChatVisible = false } }
-    func windowWillClose(_ notification: Notification) { if isMain(notification) { store.isChatVisible = false } }
+    func windowWillClose(_ notification: Notification) {
+        if isMain(notification) { store.isChatVisible = false }
+        // Closing the viewer must stop playback: drop its content so the player is torn down.
+        if let w = notification.object as? NSWindow, w === viewerWindow {
+            stopPlayback(in: w.contentView)
+            w.contentView = nil
+        }
+    }
+
+    private func stopPlayback(in view: NSView?) {
+        guard let view else { return }
+        if let pv = view as? AVPlayerView {
+            pv.player?.pause()
+            pv.player = nil
+        }
+        view.subviews.forEach { stopPlayback(in: $0) }
+    }
 
     // MARK: Notifications
 

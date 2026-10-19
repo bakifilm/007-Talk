@@ -131,6 +131,7 @@ struct PlayerView: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
         nsView.player?.pause()
+        nsView.player = nil
     }
 }
 

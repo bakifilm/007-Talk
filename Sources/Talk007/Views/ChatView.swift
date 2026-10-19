@@ -298,16 +298,7 @@ struct MediaThumbnail: View {
 
     var body: some View {
         ZStack {
-            RemoteImage(url: file.previewAvailable ? store.previewURL(file, size: 640) : nil) {
-                ZStack {
-                    Color.primary.opacity(0.08)
-                    if file.previewAvailable {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: file.symbolName).font(.system(size: 30)).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ThumbnailImage(file: file, size: 640, iconSize: 30)
             .frame(width: size.width, height: size.height)
             .clipped()
 

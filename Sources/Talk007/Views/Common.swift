@@ -208,3 +208,33 @@ struct ToastView: View {
         .animation(.easeInOut(duration: 0.2), value: store.toast)
     }
 }
+
+/// Image/video thumbnail with spinner while loading and a file icon if nothing can be shown.
+struct ThumbnailImage: View {
+    @EnvironmentObject var store: AppStore
+    let file: MessageParameter
+    let size: Int
+    var iconSize: CGFloat = 28
+    @State private var image: NSImage?
+    @State private var done = false
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            } else {
+                Color.primary.opacity(0.08)
+                if done {
+                    Image(systemName: file.symbolName).font(.system(size: iconSize)).foregroundStyle(.secondary)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .task(id: "\(file.id ?? "")-\(size)") {
+            guard let api = store.apiClient else { done = true; return }
+            image = await store.media.thumbnail(for: file, size: size, api: api)
+            done = true
+        }
+    }
+}

@@ -113,6 +113,27 @@ struct PhotoContent: View {
     }
 }
 
+/// AppKit's player view. (SwiftUI's VideoPlayer crashes in apps built with Swift Package Manager.)
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let v = AVPlayerView()
+        v.controlsStyle = .floating
+        v.showsFullScreenToggleButton = true
+        v.player = player
+        return v
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player { nsView.player = player }
+    }
+
+    static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
+        nsView.player?.pause()
+    }
+}
+
 /// Streams the video from WebDAV and starts playing right away.
 struct VideoContent: View {
     @EnvironmentObject var store: AppStore
@@ -122,7 +143,7 @@ struct VideoContent: View {
     var body: some View {
         ZStack {
             if let player {
-                VideoPlayer(player: player)
+                PlayerView(player: player)
             } else {
                 ProgressView().controlSize(.small).tint(.white)
             }

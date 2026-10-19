@@ -78,12 +78,7 @@ struct ConversationInfoView: View {
                             Color.clear
                                 .aspectRatio(1, contentMode: .fit)
                                 .overlay(
-                                    RemoteImage(url: item.file.previewAvailable ? store.previewURL(item.file, size: 256) : nil) {
-                                        ZStack {
-                                            Color.primary.opacity(0.08)
-                                            Image(systemName: item.file.symbolName).foregroundStyle(.secondary)
-                                        }
-                                    }
+                                    ThumbnailImage(file: item.file, size: 256, iconSize: 18)
                                 )
                                 .clipped()
                             if item.file.isVideo {

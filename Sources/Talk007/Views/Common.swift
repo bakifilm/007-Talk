@@ -120,7 +120,7 @@ struct RoomRow: View {
         .padding(.horizontal, 6)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(room.unreadMessages > 0 ? Color.red.opacity(0.18) : Color.clear)
+                .fill(room.unreadMessages > 0 ? Color.red.opacity(0.32) : Color.clear)
         )
         .padding(.horizontal, -6)
     }
@@ -145,7 +145,7 @@ struct SearchField: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.10)))
     }
 }
 
@@ -243,5 +243,25 @@ struct ThumbnailImage: View {
             image = await store.media.thumbnail(for: file, size: size, api: api)
             done = true
         }
+    }
+}
+
+
+/// The window's background photo, darkened so light text stays readable.
+struct AppBackground: View {
+    private static let image: NSImage? = Bundle.main.url(forResource: "background", withExtension: "jpg")
+        .flatMap { NSImage(contentsOf: $0) }
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let img = Self.image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            }
+            LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.15), .black.opacity(0.45)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .clipped()
+        .ignoresSafeArea()
     }
 }

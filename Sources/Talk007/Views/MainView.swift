@@ -8,7 +8,7 @@ struct MainView: View {
         Group {
             if store.loginState == .loggedIn {
                 HStack(spacing: 0) {
-                    SidebarView().frame(width: 290)
+                    SidebarView().frame(width: 290).background(Color.black.opacity(0.40))
                     Divider()
                     if let room = store.selectedRoom {
                         ChatView(room: room).id(room.token)
@@ -27,6 +27,9 @@ struct MainView: View {
                 .sheet(isPresented: $store.showNewConversation) {
                     NewConversationView().environmentObject(store)
                 }
+                .sheet(isPresented: $store.showFilePicker) {
+                    NextcloudFilePicker().environmentObject(store)
+                }
                 .sheet(item: $store.forwarding) { message in
                     ForwardView(message: message).environmentObject(store)
                 }
@@ -35,6 +38,8 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 700, minHeight: 460)
+        .background(AppBackground())
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -115,6 +120,7 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
 
             Divider()
 

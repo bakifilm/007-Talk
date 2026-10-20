@@ -67,6 +67,20 @@ struct MessageParameter: Decodable {
         previewAvailable = c.flexString(.previewAvailable) == "yes"
     }
 
+    /// Builds a parameter for a file browsed on the server (not from a chat message).
+    init(remote: RemoteFile) {
+        type = "file"
+        id = remote.fileId
+        name = remote.name
+        link = nil
+        path = remote.path
+        mimetype = remote.mimetype
+        size = remote.size
+        width = nil
+        height = nil
+        previewAvailable = remote.hasPreview
+    }
+
     var isImage: Bool { mimetype?.hasPrefix("image/") ?? false }
     var isVideo: Bool { mimetype?.hasPrefix("video/") ?? false }
     var isMedia: Bool { isImage || isVideo }
@@ -186,6 +200,20 @@ struct Room: Decodable, Identifiable {
         }
         return text
     }
+}
+
+/// A file or folder in the user's Nextcloud storage (from WebDAV).
+struct RemoteFile: Identifiable, Hashable {
+    let path: String        // relative to the user's root, e.g. "/Photos/a.jpg"
+    let name: String
+    let isFolder: Bool
+    let size: Int64
+    let mimetype: String
+    let modified: Date?
+    let fileId: String?
+    let hasPreview: Bool
+
+    var id: String { path }
 }
 
 struct UserSuggestion: Decodable, Identifiable {

@@ -1,9 +1,36 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @EnvironmentObject var store: AppStore
     let room: Room
+    @State private var dropTargeted = false
+
+    @ViewBuilder private var dropHighlight: some View {
+        if dropTargeted {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
+                RoundedRectangle(cornerRadius: 14).stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8]))
+                Label("Drop to send", systemImage: "square.and.arrow.down").font(Theme.title)
+            }
+            .padding(12)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func loadURLs(_ providers: [NSItemProvider], done: @escaping ([URL]) -> Void) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+        for p in providers {
+            group.enter()
+            _ = p.loadObject(ofClass: URL.self) { url, _ in
+                if let url, url.isFileURL { DispatchQueue.main.async { urls.append(url) } }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { done(urls) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,9 +59,16 @@ struct ChatView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
+            .background(Color.black.opacity(0.35))
 
             Divider()
             MessageList(room: room)
+                .overlay(dropHighlight)
+                .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                    guard room.readOnly == 0 else { return false }
+                    loadURLs(providers) { store.uploadFiles($0) }
+                    return true
+                }
             Divider()
             Composer(readOnly: room.readOnly == 1)
         }
@@ -100,7 +134,7 @@ struct DaySeparator: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(Capsule().fill(Color.primary.opacity(0.05)))
+            .background(Capsule().fill(Color.black.opacity(0.45)))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
     }
@@ -216,7 +250,7 @@ struct MessageRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isMine ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
+                .fill(isMine ? Color.accentColor.opacity(0.55) : Color(white: 0.16).opacity(0.82))
         )
         .contextMenu {
             if !message.isDeleted {
@@ -366,7 +400,32 @@ struct Composer: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             }
+            if let status = store.uploadStatus {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(status).font(Theme.caption).lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            }
             HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button { chooseLocalFiles() } label: {
+                        Label("Upload from Device…", systemImage: "square.and.arrow.up")
+                    }
+                    Button { store.showFilePicker = true } label: {
+                        Label("Share from \(store.serverName)…", systemImage: "folder")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 26))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(readOnly)
+                .help("Send a file")
+                .padding(.bottom, 2)
+
                 TextField(readOnly ? "This conversation is read-only" : "Message", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(Theme.body)
@@ -378,8 +437,9 @@ struct Composer: View {
                     .padding(.vertical, 9)
                     .background(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
+                            .fill(Color.white.opacity(0.10))
                     )
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.12)))
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
                 }
@@ -390,8 +450,19 @@ struct Composer: View {
             }
         }
         .padding(12)
+        .background(Color.black.opacity(0.35))
         .onAppear { focused = true }
         .onChange(of: store.replyTo?.id) { _ in focused = true }
+    }
+
+    private func chooseLocalFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Send"
+        panel.message = "Choose files to send"
+        if panel.runModal() == .OK { store.uploadFiles(panel.urls) }
     }
 
     private func send() {

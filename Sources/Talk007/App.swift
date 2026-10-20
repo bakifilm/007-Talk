@@ -111,10 +111,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         if window == nil {
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 880, height: 600),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered, defer: false
             )
             w.title = "007 Talk"
+            // Dark look over the background photo; the photo also shows behind the title bar.
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.backgroundColor = .black
             w.contentView = NSHostingView(rootView: MainView().environmentObject(store))
             w.minSize = NSSize(width: 640, height: 420)
             w.isReleasedWhenClosed = false

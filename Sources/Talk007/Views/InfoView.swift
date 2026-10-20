@@ -64,7 +64,7 @@ struct ConversationInfoView: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color.black.opacity(0.55))
     }
 
     private var mediaGrid: some View {

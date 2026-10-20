@@ -36,6 +36,12 @@ final class AppStore: ObservableObject {
 
     let media = MediaCache()
 
+    // Sending files
+    @Published private(set) var uploadStatus: String?
+    @Published var showFilePicker = false
+    @Published private(set) var serverName = "Nextcloud"
+    private var attachmentsFolder = "/Talk"
+
     // Settings
     @Published var showInDock: Bool = UserDefaults.standard.object(forKey: "showInDock") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showInDock, forKey: "showInDock"); applyDockPolicy() }
@@ -152,6 +158,12 @@ final class AppStore: ObservableObject {
         lastSeenMessage = [:]
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         startRoomsLoop()
+        let api = self.api
+        Task {
+            guard let info = await api?.serverInfo(), self.api === api else { return }
+            attachmentsFolder = info.attachmentsFolder
+            serverName = info.name
+        }
     }
 
     private static func normalize(_ input: String) -> URL? {
@@ -396,6 +408,54 @@ final class AppStore: ObservableObject {
                 toast = "Could not save the file."
             }
         }
+    }
+
+    // MARK: Sending files
+
+    /// Uploads local files to the Talk folder (like the web app) and shares them into the open conversation.
+    func uploadFiles(_ urls: [URL]) {
+        guard let token = selectedToken, let api, !urls.isEmpty else { return }
+        let folder = attachmentsFolder
+        Task {
+            await api.ensureFolder(folder)
+            var failed = 0
+            for (i, url) in urls.enumerated() {
+                let name = url.lastPathComponent
+                uploadStatus = urls.count > 1 ? "Sending \(i + 1) of \(urls.count): \(name)" : "Sending \(name)…"
+                do {
+                    let target = await api.uniquePath(folder: folder, name: name)
+                    try await api.upload(fileURL: url, toPath: target)
+                    try await api.shareFile(path: target, toRoom: token)
+                } catch {
+                    failed += 1
+                }
+            }
+            uploadStatus = nil
+            toast = failed == 0 ? (urls.count > 1 ? "\(urls.count) files sent" : "File sent")
+                                : "\(failed) file(s) could not be sent"
+            await refreshRooms()
+        }
+    }
+
+    /// Shares files that are already in the user's Nextcloud.
+    func shareRemoteFiles(_ files: [RemoteFile]) {
+        guard let token = selectedToken, let api, !files.isEmpty else { return }
+        Task {
+            var failed = 0
+            for (i, f) in files.enumerated() {
+                uploadStatus = files.count > 1 ? "Sharing \(i + 1) of \(files.count): \(f.name)" : "Sharing \(f.name)…"
+                do { try await api.shareFile(path: f.path, toRoom: token) } catch { failed += 1 }
+            }
+            uploadStatus = nil
+            toast = failed == 0 ? (files.count > 1 ? "\(files.count) files shared" : "File shared")
+                                : "\(failed) file(s) could not be shared"
+            await refreshRooms()
+        }
+    }
+
+    func listRemoteFolder(_ path: String) async throws -> [RemoteFile] {
+        guard let api else { return [] }
+        return try await api.listFolder(path)
     }
 
     // MARK: Archive

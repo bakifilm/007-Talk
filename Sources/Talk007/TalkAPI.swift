@@ -20,7 +20,7 @@ let userAgent = "007 Talk (macOS)"
 final class TalkAPI {
     let account: Account
     private let password: String
-    private let session: URLSession
+    let session: URLSession
 
     init(account: Account, password: String) {
         self.account = account

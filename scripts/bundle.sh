@@ -20,6 +20,7 @@ for s in 16 32 128 256 512; do
   sips -z $d $d Resources/icon.png --out "build/AppIcon.iconset/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/background.jpg "$APP/Contents/Resources/background.jpg"
 
 sed "s/__VERSION__/$VERSION/g; s/__BUILD__/$BUILD/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 
